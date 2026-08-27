@@ -31,9 +31,49 @@ set ở tests/vn_pii_testset.jsonl):
 from __future__ import annotations
 
 
-def detect(text: str) -> list[dict]:
-    raise NotImplementedError("BƯỚC 3a: implement PII detection")
+import re
 
+def detect(text: str) -> list[dict]:
+    results = []
+    
+    # EMAIL
+    for m in re.finditer(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", text):
+        results.append({"type": "EMAIL", "start": m.start(), "end": m.end()})
+        
+    # CCCD: 12 digits
+    for m in re.finditer(r"\b\d{12}\b", text):
+        results.append({"type": "VN_CCCD", "start": m.start(), "end": m.end()})
+        
+    # Phone: starts with 0, 10 digits total. Might have spaces/hyphens.
+    for m in re.finditer(r"\b0\d{3}[\s-]?\d{3}[\s-]?\d{3}\b", text):
+        results.append({"type": "VN_PHONE", "start": m.start(), "end": m.end()})
+        
+    # Bank account: context sensitive
+    for m in re.finditer(r"(?i)(?:stk|số tài khoản|tk|tài khoản)\s*[:\-]?\s*(\d{8,16})\b", text):
+        results.append({"type": "VN_BANK_ACCOUNT", "start": m.start(1), "end": m.end(1)})
+        
+    # Filter overlaps
+    filtered = []
+    for r in results:
+        overlap = False
+        for f in filtered:
+            if r["start"] < f["end"] and r["end"] > f["start"]:
+                overlap = True
+                break
+        if not overlap:
+            filtered.append(r)
+            
+    return filtered
 
 def redact(text: str) -> str:
-    raise NotImplementedError("BƯỚC 3a: implement PII redaction")
+    entities = detect(text)
+    entities.sort(key=lambda x: x["start"], reverse=True)
+    
+    redacted_text = text
+    for ent in entities:
+        start = ent["start"]
+        end = ent["end"]
+        etype = ent["type"]
+        redacted_text = redacted_text[:start] + f"[REDACTED_{etype}]" + redacted_text[end:]
+        
+    return redacted_text
