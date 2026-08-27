@@ -33,12 +33,73 @@ rồi gọi verify() phải trả về False.
 """
 from __future__ import annotations
 
+import json
+import hashlib
 from pathlib import Path
 
+def _get_hash(entry_without_hash: dict) -> str:
+    serialized = json.dumps(entry_without_hash, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 def append(entry: dict, path: Path) -> dict:
-    raise NotImplementedError("BƯỚC 3d: implement ledger append")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    prev_hash = "0" * 64
+    
+    if path.exists() and path.stat().st_size > 0:
+        with path.open("r", encoding="utf-8") as f:
+            last_line = None
+            for line in f:
+                if line.strip():
+                    last_line = line
+            if last_line:
+                try:
+                    last_entry = json.loads(last_line)
+                    if "hash" in last_entry:
+                        prev_hash = last_entry["hash"]
+                except json.JSONDecodeError:
+                    pass
 
+    new_entry = dict(entry)
+    new_entry["prev_hash"] = prev_hash
+    if "hash" in new_entry:
+        del new_entry["hash"]
+        
+    new_entry["hash"] = _get_hash(new_entry)
+    
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(new_entry, ensure_ascii=False, sort_keys=True) + "\n")
+        
+    return new_entry
 
 def verify(path: Path) -> bool:
-    raise NotImplementedError("BƯỚC 3d: implement ledger verify")
+    if not path.exists():
+        return False
+        
+    prev_hash = "0" * 64
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                return False
+                
+            if not entry.get("reason"):
+                return False
+                
+            if entry.get("prev_hash") != prev_hash:
+                return False
+                
+            expected_hash = entry.get("hash")
+            temp_entry = dict(entry)
+            if "hash" in temp_entry:
+                del temp_entry["hash"]
+                
+            if expected_hash != _get_hash(temp_entry):
+                return False
+                
+            prev_hash = expected_hash
+            
+    return True
